@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Картотека</title>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#e8ecef;--panel:#f7f9fa;--ink:#17262f;--mute:#5d6e78;--line:#c3cdd3;--acc:#1f5c8b;--accink:#fff;--danger:#a63a2b;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#10181d;--panel:#18232a;--ink:#e6edf1;--mute:#93a4ae;--line:#2d3d46;--acc:#6fb1e0;--accink:#0c1a24;--danger:#e58b7c;color-scheme:dark}}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.5 "Golos Text",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:860px;margin:0 auto;padding:28px 16px 64px}
+h1{font-size:clamp(30px,6vw,44px);line-height:1.05;margin:0 0 4px;font-weight:700;letter-spacing:-.02em}
+.sub{color:var(--mute);margin:0 0 12px}
+.status{font-size:14px;color:var(--mute);margin:0 0 16px;min-height:21px}.status.err{color:var(--danger)}
+form{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;display:grid;gap:12px;grid-template-columns:1fr 1fr}
+label{display:grid;gap:4px;font-size:14px;color:var(--mute)}label.wide{grid-column:1/-1}
+input[type=text],input[type=search]{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px 12px;width:100%}
+input[type=file]{font:inherit;color:var(--mute);font-size:14px;max-width:100%}
+input:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.actions{grid-column:1/-1;display:flex;justify-content:flex-end}
+button{font:inherit;cursor:pointer;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--ink);padding:8px 12px}
+button:disabled{opacity:.55;cursor:default}
+button.main{background:var(--acc);color:var(--accink);border-color:var(--acc);font-weight:500;padding:10px 18px}
+button.del{color:var(--danger);border-color:transparent;padding:4px 8px;font-size:14px}
+.bar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:28px 0 10px}.bar h2{margin:0;font-size:20px}.bar input{max-width:240px}
+.list{display:grid;gap:10px}
+.row{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) auto;gap:8px 16px;align-items:start}
+.name{font-weight:700;font-size:18px;overflow-wrap:anywhere}
+.link a{color:var(--acc);overflow-wrap:anywhere}.none{color:var(--mute);font-size:14px}
+.files{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:3px 4px 3px 10px;font-size:13px;max-width:100%}
+.chip button{border:0;padding:0 6px;color:var(--mute);font-size:15px;line-height:1}
+.chip a{color:var(--acc);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.thumb{height:44px;width:44px;object-fit:cover;border-radius:6px;border:1px solid var(--line);background:var(--bg)}
+.addf{font-size:13px;padding:3px 10px;margin-top:6px}
+.empty{border:1px dashed var(--line);border-radius:10px;padding:28px;text-align:center;color:var(--mute)}
+@media (max-width:620px){form{grid-template-columns:1fr}.row{grid-template-columns:1fr}.bar{flex-wrap:wrap}.bar input{max-width:none}}
+</style>
+</head>
+<body>
+<main>
+<h1>Картотека</h1>
+<p class="sub">Общий список: имя, фамилия, ссылка и файлы. Данные хранятся на сервере.</p>
+<p class="status" id="status" role="status"></p>
+
+<form id="f" autocomplete="off">
+  <label>Имя<input type="text" id="first" required></label>
+  <label>Фамилия<input type="text" id="last" required></label>
+  <label class="wide">Ссылка (необязательно)<input type="text" id="url" placeholder="https://"></label>
+  <label class="wide">Файлы (необязательно)<input type="file" id="files" multiple></label>
+  <div class="actions"><button class="main" type="submit" id="go">Добавить человека</button></div>
+</form>
+
+<div class="bar"><h2 id="count">Люди</h2><input type="search" id="q" placeholder="Поиск по имени" aria-label="Поиск по имени"></div>
+<div class="list" id="list"></div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+/* ВСТАВЬТЕ СВОИ ДАННЫЕ ИЗ SUPABASE: Project Settings → API */
+var SUPABASE_URL = 'https://zxqxpormkfuagkckwxld.supabase.co';
+var SUPABASE_KEY = 'sb_publishable__HmlxkY0gg4AIEAgSEHu7Q_Jkeo3cHK';
+var BUCKET = 'files';
+
+(function(){
+  var $=function(id){return document.getElementById(id)};
+  var people=[], sb=null;
+  function setStatus(t,err){var s=$('status');s.textContent=t;s.className='status'+(err?' err':'')}
+  function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
+  function fixUrl(v){v=(v||'').trim();if(!v)return '';if(!/^https?:\/\//i.test(v))v='https://'+v;try{var u=new URL(v);return /^https?:$/.test(u.protocol)?u.href:''}catch(e){return ''}}
+  function rid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8)}
+  function ext(n){var m=/\.([A-Za-z0-9]{1,8})$/.exec(n||'');return m?'.'+m[1].toLowerCase():''}
+
+  if(!window.supabase||SUPABASE_URL.indexOf('ВАШ')>-1||SUPABASE_KEY.indexOf('ВАШ')>-1){
+    setStatus('Сначала впишите SUPABASE_URL и SUPABASE_KEY в начале скрипта этого файла.',true);
+    $('f').hidden=true; return;
+  }
+  sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+
+  function load(){
+    return sb.from('people').select('*').order('created',{ascending:false}).then(function(r){
+      if(r.error){setStatus('Не удалось загрузить список: '+r.error.message,true);return}
+      people=(r.data||[]).map(function(x){x.files=x.files||[];return x});
+      render();
+    });
+  }
+  function uploadAll(list){
+    var out=[];
+    return Array.prototype.slice.call(list||[]).reduce(function(chain,f){
+      return chain.then(function(){
+        var path=rid()+ext(f.name);
+        return sb.storage.from(BUCKET).upload(path,f,{contentType:f.type||'application/octet-stream'}).then(function(r){
+          if(r.error)throw r.error;
+          var pub=sb.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+          out.push({path:path,url:pub,name:f.name,type:f.type||'',size:f.size});
+        });
+      });
+    },Promise.resolve()).then(function(){return out});
+  }
+  function dropFiles(files){
+    var paths=(files||[]).map(function(f){return f.path});
+    if(paths.length) return sb.storage.from(BUCKET).remove(paths);
+    return Promise.resolve();
+  }
+  function fail(e){setStatus('Ошибка: '+((e&&e.message)||'не удалось выполнить действие'),true)}
+  function ok(){setStatus('',false)}
+
+  function render(){
+    var q=$('q').value.trim().toLowerCase();
+    var shown=people.filter(function(p){return (p.first+' '+p.last).toLowerCase().indexOf(q)>-1});
+    $('count').textContent=people.length?('Люди: '+people.length):'Люди';
+    var list=$('list'); list.textContent='';
+    if(!shown.length){list.appendChild(el('div','empty',people.length?'Никого не нашли. Измените запрос.':'Пока никого нет. Заполните форму выше и нажмите «Добавить человека».'));return}
+    shown.forEach(function(p){
+      var row=el('div','row');
+      row.appendChild(el('div','name',p.first+' '+p.last));
+      var mid=el('div','link');
+      if(p.url){var a=el('a',null,p.url.replace(/^https?:\/\//,'').replace(/\/$/,''));a.href=p.url;a.target='_blank';a.rel='noopener noreferrer';mid.appendChild(a)}
+      else mid.appendChild(el('span','none','Ссылки нет'));
+      var fw=el('div','files');
+      p.files.forEach(function(f){
+        if(/^image\//.test(f.type)){var im=el('img','thumb');im.src=f.url;im.alt=f.name;im.loading='lazy';fw.appendChild(im)}
+        var chip=el('span','chip');
+        var a2=el('a',null,f.name);a2.href=f.url;a2.target='_blank';a2.rel='noopener';chip.appendChild(a2);
+        var x=el('button',null,'×');x.type='button';x.setAttribute('aria-label','Убрать файл '+f.name);
+        x.addEventListener('click',function(){
+          var left=p.files.filter(function(g){return g.path!==f.path});
+          sb.from('people').update({files:left}).eq('id',p.id).then(function(r){
+            if(r.error)throw r.error; return dropFiles([f]);
+          }).then(load).catch(fail);
+        });
+        chip.appendChild(x);fw.appendChild(chip);
+      });
+      mid.appendChild(fw);
+      var inp=document.createElement('input');inp.type='file';inp.multiple=true;inp.hidden=true;
+      inp.addEventListener('change',function(){
+        if(!inp.files.length)return; setStatus('Загружаем файлы…',false);
+        uploadAll(inp.files).then(function(add){
+          return sb.from('people').update({files:p.files.concat(add)}).eq('id',p.id).then(function(r){if(r.error)throw r.error});
+        }).then(load).then(ok).catch(fail);
+      });
+      var ad=el('button','addf','Добавить файл');ad.type='button';ad.addEventListener('click',function(){inp.click()});
+      mid.appendChild(ad);mid.appendChild(inp);row.appendChild(mid);
+      var d=el('button','del','Удалить');d.type='button';
+      d.addEventListener('click',function(){
+        if(!confirm('Удалить «'+p.first+' '+p.last+'»?'))return;
+        sb.from('people').delete().eq('id',p.id).then(function(r){if(r.error)throw r.error;return dropFiles(p.files)}).then(load).catch(fail);
+      });
+      row.appendChild(d);list.appendChild(row);
+    });
+  }
+
+  $('f').addEventListener('submit',function(e){
+    e.preventDefault();
+    var first=$('first').value.trim(),last=$('last').value.trim(); if(!first||!last)return;
+    var go=$('go');go.disabled=true;setStatus('Сохраняем…',false);
+    uploadAll($('files').files).then(function(files){
+      return sb.from('people').insert({first:first,last:last,url:fixUrl($('url').value),files:files}).then(function(r){if(r.error)throw r.error});
+    }).then(function(){$('f').reset();$('q').value='';return load()}).then(function(){ok();$('first').focus()})
+      .catch(fail).then(function(){go.disabled=false});
+  });
+  $('q').addEventListener('input',render);
+  setInterval(function(){if(!document.hidden)load()},20000);
+  load();
+})();
+</script>
+</body>
+</html>
